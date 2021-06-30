@@ -8,7 +8,7 @@ pipeline {
         stage('Setup up environment') {
             steps {
                 container('docker') {
-                    dir("${env.WORKSPACE}/UI") {
+                    dir("${env.WORKSPACE}") {
                         sh 'npm i'
                     }
                 }
