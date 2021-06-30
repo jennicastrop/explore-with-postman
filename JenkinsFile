@@ -1,117 +1,31 @@
 #!/usr/bin/env groovy
-def deploymentStages = [:]
-
-
 pipeline {
     agent any
     stages {
         stage('Setup up environment') {
             steps {
-                container('docker') {
-                    dir("${env.WORKSPACE}") {
-                        sh 'npm i'
-                    }
-                }
-            }
-        }
-        stage('Cypress execution') {
-            steps {
-                script {
-                    dir("${env.WORKSPACE}/UI") {
-                        def map = getFeaturesGroupsToRun()
-                        map.each{ key, value -> 
-                            deploymentStages["${key}"] = {
-                                stage("Stage ${key}") {
-                                    catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                                        def featureList = (params.FEATURES!=null) ? params.FEATURES : map[key].join(',')
-                                        container('docker') {
-                                            dir("${env.WORKSPACE}/UI") {
-                                                sh 'chmod 777 scripts/startDisplay.sh'
-                                                sh './scripts/startDisplay.sh'
-                                                sh "npm run cy:run:ci --key=${key} --testtype=${TEST_TYPE} --user=${USER} --password=${PASSWORD} --seed=${MOCK_SEED} --environment=${TEST_ENV} --testbrowser=${BROWSER} --featurelist=${featureList}"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    parallel deploymentStages
-                }
-            }
-        }
-        stage('Reporting') {
-            steps {
-                dir("${env.WORKSPACE}/UI") {
-                    allure([
-                        includeProperties: true,
-                        jdk: '',
-                        properties: [],
-                        reportBuildPolicy: 'ALWAYS',
-                        report: "${env.WORKSPACE}/UI/allure-report",
-                        results: [[path: "${env.WORKSPACE}/UI/allure-results"]]
-                    ])
-                    slackSendMessage('#36C5F0', "Data Profile UI execution has finished.\n Type of Execution: ${TEST_TYPE}\n Browser: ${BROWSER}\n You can see results in Allure Report:\t:memo:\n ${env.BUILD_URL}allure/ \n", '', false)
-                }
-            }
-        }
-        stage('Update Testrail Report') {
-            when {
-                expression { params.UPDATE_TESTRAIL == true }
-            }
-            steps {
-                container('docker') {
-                    dir("${env.WORKSPACE}/UI") {
-                        sh "node ${env.WORKSPACE}/UI/scripts/testrail.js ${TEST_RUN_ID} ${TESTRAIL_USER} ${TESTRAIL_API_KEY} ${TESTRAIL_HOST}"
-                    }
-                }
-            }
-        }
-        stage('Update Metrics') {
-            when {
-                expression { params.UPDATE_METRICS == true }
-            }
-            steps {
                 script {
                     sh 'cd ..'
-                    sh 'rm -rf metrics'
-                    sh 'mkdir -p metrics'
-                    dir('metrics') {
-                        git branch: "develop", credentialsId: 'svc-jenkins2', url: 'https://bitbucket.org/sparkcognition/daqa-metrics.git'
-                        sh "cp ../UI/gsheet-api/config_${TEST_TYPE}.json config.json"
-                        sh 'cp ../UI/gsheet-api/credentials.json .'
-                        sh 'cp ../UI/gsheet-api/token.pickle .'
-                        sh 'cp -r ../UI/allure-results .'
-                        sh 'cp -r ../UI/allure-report .'
-                        container('python') {
-                            sh 'ls'
-                            sh 'python3 -m venv venv'
-                            sh '. venv/bin/activate'
-                            sh 'pip install -r requirements.txt'
-                            sh "python3 main.py ${BUILD_URL} ${WORKSPACE}/metrics ${BROWSER}"
-                        }
+                    sh 'rm -rf app'
+                    sh 'mkdir -p app'
+                    dir('app') {
+                        git branch: "main", credentialsId: 'github', url: 'https://github.com/mwinteringham/restful-booker.git'
+                        sh 'npm install'
+                        sh 'npm start'
+                        
                     }
                 } 
             }
         }
-        stage('Post Building Action') {
+        stage('Test execution') {
             steps {
-                dir("${env.WORKSPACE}/UI/cypress/screenshots") {
-                    archiveArtifacts artifacts: '**/*.png', allowEmptyArchive: true, fingerprint: true
-                }
-                dir("${env.WORKSPACE}/UI/cypress/videos") {
-                    archiveArtifacts artifacts: '**/*.mp4', allowEmptyArchive: true, fingerprint: true
-                }
                 script {
-                    container('docker') {
-                        sh 'ls'
-                        OUTPUT = sh (
-                            script: "node ${env.WORKSPACE}/UI/scripts/printExecutionSummary ${env.WORKSPACE}/UI/allure-report/history/history-trend.json", 
-                            returnStdout: true
-                        )
+                    dir("${env.WORKSPACE}") {
+                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {                            
+                               sh ""
+                        }
                     }
                 }
-                slackSendMessage('#2980B9', "${OUTPUT}", 'thermometer', true)
             }
         }
     }
